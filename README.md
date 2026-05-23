@@ -1,37 +1,47 @@
 # Stockhold
 
-Stockhold is a small Next.js application that demonstrates concurrency-safe inventory reservations for a multi-warehouse catalog. It was built for the Allo Health engineering take-home exercise.
+Stockhold is a small Next.js application that demonstrates concurrency-safe inventory reservations for a multi-warehouse catalog. It was built for the Allo Health engineering take-home exercise and focuses on the part of the problem that matters most: preventing overselling when multiple users try to reserve the same stock at the same time.
 
-## What It Does
+## Live Demo
 
-- Lists products and available inventory across warehouses
-- Creates short-lived reservations during checkout
-- Confirms reservations when payment succeeds
-- Releases reservations when payment fails or expires
-- Surfaces `409` stock conflicts and `410` expiry errors directly in the UI
+- Production URL: [https://allo-stockhold-assignment.vercel.app](https://allo-stockhold-assignment.vercel.app)
+
+## What The App Does
+
+- Lists products with inventory split by warehouse
+- Creates a temporary reservation during checkout
+- Confirms a reservation when payment succeeds
+- Releases a reservation when payment fails or when the hold expires
+- Shows stock conflict and expiry errors directly in the UI
 
 ## Stack
 
 - Next.js 16 App Router
 - TypeScript
-- Prisma
+- Prisma 7
 - PostgreSQL
 - Tailwind CSS
 - Zod
 
-## Data Model
+## Core Data Model
 
-The app uses four core models:
+The app uses four main tables:
 
 - `Product`
 - `Warehouse`
 - `Inventory`
 - `Reservation`
 
-`Inventory` stores:
+`Inventory` represents stock for one product in one warehouse and stores:
 
 - `totalUnits`
 - `reservedUnits`
+
+Available stock is always calculated as:
+
+```text
+availableUnits = totalUnits - reservedUnits
+```
 
 `Reservation` stores:
 
@@ -41,42 +51,84 @@ The app uses four core models:
 - `confirmedAt`
 - `releasedAt`
 
-## Concurrency Approach
+## Reservation Flow
 
-The reserve flow is the most important part of the exercise.
+### 1. Reserve
 
-When a reservation request is created, the server:
+When the user clicks `Reserve`, the server:
 
 1. Starts a database transaction
-2. Releases any expired reservations for the same inventory row
-3. Runs a guarded SQL `UPDATE` that increments `reservedUnits` only if enough stock is still available
-4. Creates the reservation row only if that update succeeds
+2. Releases any expired reservations for that inventory row
+3. Runs a guarded SQL `UPDATE` on `Inventory`
+4. Increments `reservedUnits` only if enough stock is still available
+5. Creates a `PENDING` reservation only if the inventory update succeeds
 
-Because the inventory update and reservation creation happen inside a single transaction, two simultaneous requests for the last unit cannot both succeed. One request wins and the other receives `409`.
+If two users try to reserve the last unit at the same time, both requests can reach the server, but only one transaction can update the row successfully. The other request receives `409 Conflict`.
 
-## Expiry Approach
+### 2. Confirm
 
-This project uses lazy expiry cleanup.
+When the user confirms the purchase:
 
-Expired `PENDING` reservations are released automatically during reads and writes:
+1. The reservation is checked again inside a transaction
+2. The reservation must still be `PENDING`
+3. The reservation must not be expired
+4. `Reservation.status` changes to `CONFIRMED`
+5. `Inventory.reservedUnits` decreases
+6. `Inventory.totalUnits` also decreases permanently
 
-- product catalog reads
+This models a completed sale.
+
+### 3. Release
+
+When the user cancels the reservation, or the hold expires:
+
+1. The reservation is marked `RELEASED`
+2. `Inventory.reservedUnits` decreases
+3. `Inventory.totalUnits` stays the same
+
+This returns the stock back to availability.
+
+## Concurrency Strategy
+
+The most important requirement in this assignment is avoiding race conditions.
+
+This project protects the reserve path with:
+
+- a database transaction
+- a guarded SQL `UPDATE` that succeeds only when enough stock is available
+- reservation creation inside the same transaction as the inventory change
+
+The critical query updates inventory only when this condition is true:
+
+```text
+(totalUnits - reservedUnits) >= requestedQuantity
+```
+
+That means the database, not the UI, is the final authority on whether the reservation can be created. This keeps the system safe even if two requests arrive at nearly the same time.
+
+## Expiry Strategy
+
+This project uses lazy expiry cleanup instead of a continuously running worker.
+
+Expired `PENDING` reservations are released automatically during:
+
+- catalog reads
 - reservation detail reads
 - reserve requests
 - confirm requests
 - release requests
 
-This keeps inventory accurate without requiring a continuously running worker. In production, this can be complemented with a scheduled job for more proactive cleanup.
+That keeps the visible inventory accurate without adding background infrastructure to a small take-home project. In a larger production system, I would likely add a scheduled cleanup job as a complement so expiry is also enforced proactively.
 
-## API
+## API Summary
 
 ### `GET /api/products`
 
-Lists products with per-warehouse availability.
+Returns products with per-warehouse inventory.
 
 ### `GET /api/warehouses`
 
-Lists warehouses.
+Returns the warehouse list.
 
 ### `POST /api/reservations`
 
@@ -95,7 +147,8 @@ Request body:
 Possible responses:
 
 - `201` reservation created
-- `409` not enough stock
+- `404` inventory row not found
+- `409` insufficient stock
 
 ### `POST /api/reservations/:id/confirm`
 
@@ -104,54 +157,68 @@ Confirms a reservation.
 Possible responses:
 
 - `200` reservation confirmed
+- `409` reservation already released or inventory could not be confirmed
 - `410` reservation expired
 
 ### `POST /api/reservations/:id/release`
 
-Releases a reservation early.
+Releases a reservation.
 
 Possible responses:
 
 - `200` reservation released
+- `409` reservation already confirmed
 
 ## Local Setup
 
-1. Install dependencies:
+### Prerequisites
+
+- Node.js 22+
+- A hosted or local PostgreSQL database
+
+### 1. Clone the repository
 
 ```bash
-npm install
+git clone <your-repo-url>
+cd allo-stockhold-assignment
 ```
 
-2. Create a `.env` file:
+### 2. Create the environment file before installing dependencies
+
+`prisma generate` runs during install and build, so `DATABASE_URL` should be present first.
+
+Create a `.env` file in the project root:
 
 ```env
 DATABASE_URL="your-postgres-connection-string"
 RESERVATION_TTL_MINUTES=10
 ```
 
-3. Generate the Prisma client:
+### 3. Install dependencies
 
 ```bash
-npm run db:generate
+npm install
 ```
 
-4. Apply the schema to your database:
+### 4. Push the schema to the database
 
 ```bash
-npx prisma db push
+npm run db:push
 ```
 
-5. Seed demo data:
+### 5. Seed demo data
 
 ```bash
 npm run db:seed
 ```
 
-6. Start the app:
+### 6. Start the development server
 
 ```bash
 npm run dev
 ```
+
+Open [http://localhost:3000](http://localhost:3000).
 
 ## Seed Data
 
@@ -161,15 +228,46 @@ The seed script creates:
 - 3 products
 - a mix of healthy stock and low-stock inventory rows
 
-The low-stock rows are useful for demonstrating reservation conflicts during review.
+The low-stock rows are intentional so the `409` conflict path is easy to demonstrate.
+
+## Deployment Notes
+
+The production app is deployed on Vercel and uses a hosted PostgreSQL database.
+
+Required environment variables:
+
+```env
+DATABASE_URL="your-postgres-connection-string"
+RESERVATION_TTL_MINUTES=10
+```
+
+Because Prisma client generation runs during install and build, `DATABASE_URL` must also be configured in the deployment environment.
+
+## Validation
+
+The project was verified with:
+
+- `npm run lint`
+- `npx tsc --noEmit`
+- `npm run build`
+
+Functional checks covered:
+
+- reserve flow
+- cancel flow
+- confirm flow
+- stock release on expiry
+- sold-out conflict handling
 
 ## Trade-offs
 
-- I chose lazy expiry cleanup because it keeps the project simple and still demonstrates the right inventory behavior.
-- I used a straightforward service layer and direct SQL only where correctness under concurrency mattered most.
-- I did not add idempotency yet. That would be the next improvement, likely using an `Idempotency-Key` table or Redis.
+- I chose lazy expiry cleanup to keep the implementation small and easy to review while still preserving correct inventory behavior.
+- I used direct SQL only for the inventory updates where correctness under concurrency mattered most.
+- I added transaction retry handling for temporary transaction start delays that can happen with hosted pooled database connections.
+- I did not implement idempotency keys yet. That would be the next improvement for making confirm and release flows safer under client retries.
 
-## Notes
+## Notes For Reviewers
 
-- The UI is intentionally simple and readable so the reservation flow is easy to review.
-- The current implementation is designed to work well with hosted PostgreSQL providers such as Neon or Supabase.
+- The UI is intentionally simple so the reservation behavior is easy to follow.
+- The reservation page includes a visible countdown to make expiry behavior easy to test.
+- The main design goal of this submission is correctness and clarity over framework complexity.
