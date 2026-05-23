@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f5efe3;
+  --foreground: #1b140c;
+  --ink: #1f1711;
+  --muted: #746454;
+  --panel: #fffaf2;
+  --line: rgba(91, 64, 34, 0.12);
+  --line-strong: rgba(91, 64, 34, 0.25);
+  --accent: #8f4f19;
+  --accent-strong: #6d3d13;
+  --danger: #a33f2b;
+  --success: #265f43;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: "Trebuchet MS", "Segoe UI", sans-serif;
+  --font-mono: "Consolas", "Courier New", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.85), transparent 28%),
+    linear-gradient(180deg, #f7f2e8 0%, #efe4d2 100%);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+a,
+button,
+input {
+  transition:
+    color 160ms ease,
+    background-color 160ms ease,
+    border-color 160ms ease,
+    transform 160ms ease;
+}
+
+button:active {
+  transform: translateY(1px);
+}
