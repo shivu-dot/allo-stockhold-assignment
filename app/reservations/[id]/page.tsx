@@ -27,7 +27,7 @@ export default async function ReservationPage({ params }: ReservationPageProps) 
             {reservation.product.name}
           </h1>
           <p className="mt-2 text-sm leading-7 text-[color:var(--muted)]">
-            Reservation <span className="font-mono text-[color:var(--ink)]">{reservation.id}</span>
+            Reservation ID <span className="font-mono text-[color:var(--ink)]">{reservation.id}</span>
           </p>
 
           <dl className="mt-8 grid gap-4 md:grid-cols-2">
