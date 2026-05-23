@@ -1,9 +1,9 @@
 import { unstable_noStore as noStore } from "next/cache";
 
-import { ReservationStatus } from "@prisma/client";
-
 import { prisma } from "@/lib/prisma";
 import { releaseExpiredReservations } from "@/lib/reservations";
+
+export type ReservationStatus = "PENDING" | "CONFIRMED" | "RELEASED";
 
 export type CatalogProduct = {
   id: string;
