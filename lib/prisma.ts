@@ -7,47 +7,50 @@ const globalForPrisma = globalThis as {
   prisma?: PrismaClient;
 };
 
-const connectionString = process.env.DATABASE_URL;
+function getPrismaClient() {
+  if (globalForPrisma.prisma) {
+    return globalForPrisma.prisma;
+  }
 
-function createUnavailablePrismaClient() {
-  return new Proxy(
-    {},
-    {
-      get(_target, property) {
-        if (property === "$disconnect") {
-          return async () => undefined;
-        }
+  const connectionString = process.env.DATABASE_URL;
 
-        throw new Error("DATABASE_URL is not configured for this deployment.");
-      },
+  if (!connectionString) {
+    throw new Error("DATABASE_URL is not configured for this deployment.");
+  }
+
+  const pool =
+    globalForPrisma.pool ??
+    new Pool({
+      connectionString,
+      max: 5,
+    });
+
+  const adapter = new PrismaPg(pool);
+  const client = new PrismaClient({
+    adapter,
+    log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
+    transactionOptions: {
+      maxWait: 10000,
+      timeout: 20000,
     },
-  ) as PrismaClient;
+  });
+
+  if (process.env.NODE_ENV !== "production") {
+    globalForPrisma.pool = pool;
+    globalForPrisma.prisma = client;
+  }
+
+  return client;
 }
 
-const pool =
-  connectionString && !globalForPrisma.pool
-    ? new Pool({
-        connectionString,
-        max: 5,
-      })
-    : globalForPrisma.pool;
+export const prisma = new Proxy(
+  {},
+  {
+    get(_target, property, receiver) {
+      const client = getPrismaClient();
+      const value = Reflect.get(client, property, receiver);
 
-const adapter = pool ? new PrismaPg(pool) : null;
-
-export const prisma =
-  globalForPrisma.prisma ??
-  (adapter
-    ? new PrismaClient({
-        adapter,
-        log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
-        transactionOptions: {
-          maxWait: 10000,
-          timeout: 20000,
-        },
-      })
-    : createUnavailablePrismaClient());
-
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.pool = pool ?? undefined;
-  globalForPrisma.prisma = prisma;
-}
+      return typeof value === "function" ? value.bind(client) : value;
+    },
+  },
+) as PrismaClient;
