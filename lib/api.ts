@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { ReservationError } from "@/lib/reservations";
+import { ReservationError } from "@/lib/errors";
 
 export function handleRouteError(error: unknown) {
   if (error instanceof ReservationError) {
@@ -15,12 +15,19 @@ export function handleRouteError(error: unknown) {
   }
 
   if (error instanceof Error) {
+    const isDatabaseUnavailable =
+      error.message.includes("DATABASE_URL") ||
+      error.message.toLowerCase().includes("database") ||
+      error.message.toLowerCase().includes("connection");
+
     return NextResponse.json(
       {
-        message: error.message,
+        message: isDatabaseUnavailable
+          ? "The database is not configured or reachable for this deployment."
+          : error.message,
       },
       {
-        status: 400,
+        status: isDatabaseUnavailable ? 503 : 400,
       },
     );
   }

@@ -9,31 +9,45 @@ const globalForPrisma = globalThis as {
 
 const connectionString = process.env.DATABASE_URL;
 
-if (!connectionString) {
-  throw new Error("DATABASE_URL is not configured.");
+function createUnavailablePrismaClient() {
+  return new Proxy(
+    {},
+    {
+      get(_target, property) {
+        if (property === "$disconnect") {
+          return async () => undefined;
+        }
+
+        throw new Error("DATABASE_URL is not configured for this deployment.");
+      },
+    },
+  ) as PrismaClient;
 }
 
 const pool =
-  globalForPrisma.pool ??
-  new Pool({
-    connectionString,
-    max: 5,
-  });
+  connectionString && !globalForPrisma.pool
+    ? new Pool({
+        connectionString,
+        max: 5,
+      })
+    : globalForPrisma.pool;
 
-const adapter = new PrismaPg(pool);
+const adapter = pool ? new PrismaPg(pool) : null;
 
 export const prisma =
   globalForPrisma.prisma ??
-  new PrismaClient({
-    adapter,
-    log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
-    transactionOptions: {
-      maxWait: 10000,
-      timeout: 20000,
-    },
-  });
+  (adapter
+    ? new PrismaClient({
+        adapter,
+        log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
+        transactionOptions: {
+          maxWait: 10000,
+          timeout: 20000,
+        },
+      })
+    : createUnavailablePrismaClient());
 
 if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.pool = pool;
+  globalForPrisma.pool = pool ?? undefined;
   globalForPrisma.prisma = prisma;
 }

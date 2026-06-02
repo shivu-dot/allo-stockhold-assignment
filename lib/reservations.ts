@@ -7,6 +7,7 @@ import {
 } from "@prisma/client";
 
 import { getReservationTtlMinutes } from "@/lib/env";
+import { ReservationError } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import type { ReserveRequest } from "@/lib/validators";
 
@@ -25,16 +26,6 @@ type ReservationWithRelations = Reservation & {
     location: string;
   };
 };
-
-export class ReservationError extends Error {
-  constructor(
-    public readonly statusCode: number,
-    message: string,
-  ) {
-    super(message);
-    this.name = "ReservationError";
-  }
-}
 
 export async function releaseExpiredReservations(inventoryId?: string) {
   await withTransactionRetry(async () => {

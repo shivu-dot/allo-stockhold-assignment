@@ -1,9 +1,24 @@
 import { getReservationTtlMinutes } from "@/lib/env";
-import { getCatalog } from "@/lib/catalog";
+import { type CatalogProduct, getCatalog } from "@/lib/catalog";
 import { ReserveForm } from "@/components/reserve-form";
 
+export const dynamic = "force-dynamic";
+
 export default async function Home() {
-  const products = await getCatalog();
+  let products: CatalogProduct[] = [];
+  let catalogError: string | null = null;
+
+  try {
+    products = await getCatalog();
+  } catch (error) {
+    if (isNextDynamicServerError(error)) {
+      throw error;
+    }
+
+    console.error("Catalog load failed", error);
+    catalogError = "The database is not configured or reachable for this deployment.";
+  }
+
   const reservationTtlMinutes = getReservationTtlMinutes();
 
   return (
@@ -52,6 +67,22 @@ export default async function Home() {
           </article>
         </section>
 
+        {catalogError ? (
+          <section className="rounded-[28px] border border-[color:var(--danger)]/30 bg-white/95 p-6 shadow-sm">
+            <p className="text-sm uppercase tracking-[0.24em] text-[color:var(--danger)]">
+              Deployment Notice
+            </p>
+            <h2 className="mt-3 text-2xl font-semibold text-[color:var(--ink)]">
+              The app is live, but the database is not connected yet
+            </h2>
+            <p className="mt-3 max-w-3xl text-sm leading-7 text-[color:var(--muted)]">
+              Reviewers can still view the implementation notes on this page. To enable the catalog and
+              reservation flow, configure `DATABASE_URL` in Vercel, run the Prisma migration, and seed the
+              database.
+            </p>
+          </section>
+        ) : null}
+
         <section className="space-y-6">
           <div className="flex items-end justify-between gap-4">
             <div>
@@ -66,7 +97,8 @@ export default async function Home() {
           </div>
 
           <div className="space-y-8">
-            {products.map((product) => (
+            {products.length > 0 ? (
+              products.map((product) => (
               <article
                 key={product.id}
                 className="rounded-[32px] border border-[color:var(--line)] bg-[color:var(--panel)]/90 p-6 shadow-[0_20px_60px_rgba(64,44,13,0.06)] md:p-8"
@@ -137,10 +169,23 @@ export default async function Home() {
                   ))}
                 </div>
               </article>
-            ))}
+              ))
+            ) : (
+              <div className="rounded-[28px] border border-[color:var(--line)] bg-white/90 p-6 text-sm leading-7 text-[color:var(--muted)] shadow-sm">
+                Catalog data will appear here after the deployment database is configured and seeded.
+              </div>
+            )}
           </div>
         </section>
       </div>
     </main>
+  );
+}
+
+function isNextDynamicServerError(error: unknown) {
+  return (
+    error instanceof Error &&
+    "digest" in error &&
+    (error as { digest?: string }).digest === "DYNAMIC_SERVER_USAGE"
   );
 }
